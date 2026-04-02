@@ -1,0 +1,121 @@
+# ML Intrusion Detection System
+
+A lightweight network intrusion detection system (IDS) that uses a machine learning model to classify live network traffic as **Normal** or **Malicious** in real time.
+
+## Overview
+
+This project captures raw network packets using [Scapy](https://scapy.net/), extracts protocol-level features, and runs them through a trained Decision Tree classifier. A Flask API exposes a single endpoint that sniffs 3 seconds of traffic and returns an ML verdict with a confidence score.
+
+The system is designed to detect common network attacks such as:
+- **ICMP flood / ping flood** — detected via a spike in the ICMP ratio
+- **ARP spoofing** — detected via a spike in the ARP ratio
+
+## Project Structure
+
+```
+.
+├── data_collector.py       # Captures labeled traffic samples and writes to CSV
+├── network_tools.py        # Scapy packet sniffing utility
+├── preprocessing_data.py   # Cleans data and engineers features for training
+├── model.py                # Trains the Decision Tree model and saves artifacts
+├── ids_service.py          # Flask API that runs live inference
+└── .gitignore
+```
+
+## How It Works
+
+### 1. Data Collection
+
+`data_collector.py` sniffs the `wlan0` interface in 3-second windows and records packet counts by protocol (ARP, ICMP, TCP, UDP, Other) along with a label:
+- `0` — Normal traffic
+- `1` — Malicious traffic (e.g. during a ping flood or ARP spoof attack)
+
+```bash
+sudo python3 data_collector.py <label> <num_samples> [filename]
+
+# Examples:
+sudo python3 data_collector.py 0 50   # Collect 50 normal samples
+sudo python3 data_collector.py 1 50   # Collect 50 malicious samples
+```
+
+Samples are appended to `network_data.csv` (excluded from version control).
+
+### 2. Preprocessing
+
+`preprocessing_data.py` loads the CSV, filters out empty malicious samples, and engineers two ratio features:
+- `ICMP_Ratio = ICMP_Count / (UDP_Count + 1)`
+- `ARP_Ratio  = ARP_Count  / (UDP_Count + 1)`
+
+All features are normalized using `MinMaxScaler`.
+
+### 3. Model Training
+
+`model.py` trains a Decision Tree classifier on an 80/20 train/test split and saves:
+- `intrusion_detector_model.pkl` — the trained classifier
+- `min_max_scaler.pkl` — the fitted scaler
+- `confusion_matrix.png` — test set confusion matrix
+- `feature_distribution.png` — scatter plot of ICMP Ratio vs. ARP Ratio
+
+```bash
+python3 model.py
+```
+
+### 4. Live Inference API
+
+`ids_service.py` is a Flask server that sniffs live traffic and classifies it on demand.
+
+```bash
+sudo python3 ids_service.py
+```
+
+**Endpoint:** `GET /analyze`
+
+**Example response:**
+```json
+{
+  "protocol_breakdown": {
+    "ARP":   "2 packets (1.3%)",
+    "ICMP":  "140 packets (90.3%)",
+    "TCP":   "10 packets (6.5%)",
+    "UDP":   "3 packets (1.9%)",
+    "Other": "0 packets (0.0%)"
+  },
+  "ml_verdict": "MALICIOUS",
+  "confidence": "97.4%",
+  "raw_counts": { "ARP": 2, "ICMP": 140, "TCP": 10, "UDP": 3, "Other": 0 }
+}
+```
+
+## Requirements
+
+- Python 3.8+
+- Linux with a wireless interface (default: `wlan0`)
+- Root/sudo privileges (required for packet sniffing)
+
+Install dependencies:
+
+```bash
+pip install scapy flask scikit-learn pandas numpy matplotlib seaborn
+```
+
+## Quick Start
+
+```bash
+# 1. Collect training data (run under normal and attack conditions)
+sudo python3 data_collector.py 0 50   # normal
+sudo python3 data_collector.py 1 50   # during an attack
+
+# 2. Train the model
+python3 model.py
+
+# 3. Start the IDS service
+sudo python3 ids_service.py
+
+# 4. Query the API
+curl http://localhost:5001/analyze
+```
+
+## Notes
+
+- The network interface is hardcoded to `wlan0` in `network_tools.py` and `ids_service.py`. Change this to match your interface (e.g. `eth0`, `wlan1`).
+- `network_data.csv` and `.pkl` model files are excluded from version control via `.gitignore`. Regenerate them locally using the steps above.

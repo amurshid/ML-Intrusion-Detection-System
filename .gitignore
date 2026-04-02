@@ -1,0 +1,5 @@
+confusion_matrix.png
+feature_distribution.png
+network_data.csv
+min_max_scaler.pkl
+intrusion_detector_model.pkl
